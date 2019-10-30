@@ -23,6 +23,7 @@ build = {
   type    = "builtin",
   modules = {
     ["arcturus"] = "src/arcturus.lua",
+    ["arcturus.patch"] = "src/patch.lua",
     ["arcturus.utils.log"] = "src/utils/log.lua",
     ["arcturus.utils.basic"] = "src/utils/basic.lua",
   },

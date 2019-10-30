@@ -1,12 +1,58 @@
+-- utility funcitons
+-- Parts of one from KONG @module kong.tools.utils
 local cjson = require("cjson.safe")
 local dkjson = require("dkjson")
 local pl_path = require("pl.path")
 local pl_dir = require("pl.dir")
+local pl_utils = require ("pl.utils")
 local log = require("arcturus.utils.log").log
 local uuid = require("resty.jit-uuid")
+local ffi = require("ffi")
+local pl_stringx = require ("pl.stringx")
+local system_constants = require ("lua_system_constants")
 
+local C = ffi.C
+local ffi_fill = ffi.fill
+local ffi_new = ffi.new
+local ffi_str = ffi.string
+local type = type
+local pairs = pairs
+local ipairs = ipairs
+local select = select
+local tostring = tostring
+local sort = table.sort
+local concat = table.concat
+local insert = table.insert
+local lower = string.lower
 local fmt = string.format
+local find = string.find
+local gsub = string.gsub
+local split = pl_stringx.split
+local strip = pl_stringx.strip
+local re_find = ngx.re.find
+local re_match = ngx.re.match
 local DEBUG = ngx.DEBUG
+local WARN = ngx.WARN
+
+ffi.cdef [[
+typedef unsigned char u_char;
+
+int gethostname(char *name, size_t len);
+
+int RAND_bytes(u_char *buf, int num);
+
+unsigned long ERR_get_error(void);
+void ERR_load_crypto_strings(void);
+void ERR_free_strings(void);
+
+const char *ERR_reason_error_string(unsigned long e);
+
+int open(const char * filename, int flags, int mode);
+size_t read(int fd, void *buf, size_t count);
+int write(int fd, const void *ptr, int numbytes);
+int close(int fd);
+char *strerror(int errnum);
+]]
 
 local _M = {}
 
@@ -195,4 +241,108 @@ function _M.uuid()
     return uuid()
 end
 
+--- Retrieves the hostname of the local machine
+-- @return string  The hostname
+function _M.get_hostname()
+    local result
+    local SIZE = 128
+
+    local buf = ffi_new("unsigned char[?]", SIZE)
+    local res = C.gethostname(buf, SIZE)
+
+    if res == 0 then
+        local hostname = ffi_str(buf, SIZE)
+        result = gsub(hostname, "%z+$", "")
+    else
+        local f = io.popen("/bin/hostname")
+        local hostname = f:read("*a") or ""
+        f:close()
+        result = gsub(hostname, "\n$", "")
+    end
+
+    return result
+end
+
+-- Retrieves the machine CPU core number
+function _M.get_cpu_core()
+    local ok, _, stdout = pl_utils.executeex("getconf _NPROCESSORS_ONLN")
+    if ok then
+        return stdout
+    end
+    return nil,"Retrieves cpu number failed"
+end
+
+-- Retrieves uname
+function _M.get_uname()
+    local ok,_,stdout = pl_utils.executeex("uname -a")
+    if ok then
+        return stdout
+    end
+    return nil,"Retrieves uname failed"
+end
+
+
+local function urandom_bytes(buf, size)
+    local O_RDONLY = system_constants.O_RDONLY()
+
+    local fd = ffi.C.open("/dev/urandom", O_RDONLY, 0) -- mode is ignored
+    if fd < 0 then
+      log(WARN, "Error opening random fd: ",
+                    ffi_str(ffi.C.strerror(ffi.errno())))
+
+      return false
+    end
+
+    local res = ffi.C.read(fd, buf, size)
+    if res <= 0 then
+        log(WARN, "Error reading from urandom: ",
+                    ffi_str(ffi.C.strerror(ffi.errno())))
+
+      return false
+    end
+
+    if ffi.C.close(fd) ~= 0 then
+        log(WARN, "Error closing urandom: ",
+                    ffi_str(ffi.C.strerror(ffi.errno())))
+    end
+
+    return true
+  end
+
+-- Get random bytes
+function _M.get_rand_bytes(n_bytes,urandom)
+    local bytes_buf_t = ffi.typeof "char[?]"
+
+    local buf = ffi_new(bytes_buf_t, n_bytes)
+    ffi_fill(buf, n_bytes, 0x0)
+
+    -- only read from urandom if we were explicitly asked
+    if urandom then
+      local rc = urandom_bytes(buf, n_bytes)
+
+      -- if the read of urandom was successful, we returned true
+      -- and buf is filled with our bytes, so return it as a string
+      if rc then
+        return ffi_str(buf, n_bytes)
+      end
+    end
+
+    if C.RAND_bytes(buf, n_bytes) == 0 then
+      -- get error code
+      local err_code = C.ERR_get_error()
+      if err_code == 0 then
+        return nil, "could not get SSL error code from the queue"
+      end
+
+      -- get human-readable error string
+      C.ERR_load_crypto_strings()
+      local err = C.ERR_reason_error_string(err_code)
+      C.ERR_free_strings()
+
+      return nil, "could not get random bytes (" ..
+                  "reason:" .. ffi_str(err) .. ") "
+    end
+
+    return ffi_str(buf, n_bytes)
+  end
 return _M
