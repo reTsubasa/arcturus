@@ -6,11 +6,11 @@ if not ok then
     end
 end
 
-local _M = {}
+local _M = {_VERSION = "0.1.0"}
 
 function _M.init()
     require("arcturus.patch")()
-    
+
 end
 
 function _M.new()
