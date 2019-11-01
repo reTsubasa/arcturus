@@ -1,15 +1,8 @@
 return {
-    mode = "development", -- development | production
-    env = {
-        development = {
-            port = 81,
-            webui = true,
-            webui_port = 8081,
-            worker_num = 1,
-            path = {
-                base = "/etc/arcturus"
-            },
-            pcre = "imjo"
-        }
-    }
+    mode = "full", -- full | simu | bypass
+    path = {
+        arcturus = "/etc/arcturus/config.json",
+    },
+    pcre = "imjo",
+
 }

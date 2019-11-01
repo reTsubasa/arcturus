@@ -1,8 +1,7 @@
 require("resty.core")
 
+-- patches base on KONG
 local function patch()
-    -- patches base on KONG
-
     do -- implement `sleep` in the `init_worker` context
         -- initialization code regularly uses the shm and locks.
         -- the resty-lock is based on sleeping while waiting, but that api
